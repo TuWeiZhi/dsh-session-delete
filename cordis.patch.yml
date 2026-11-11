@@ -1,0 +1,22 @@
+# ============================================================================
+# dsh-session-delete 的 bundle patch —— 把插件挂进 DSH 的配置树
+# ============================================================================
+#
+# 【这是什么】
+#   本包声明了 dsh.bundle.patch，DSH 把它当作一个「bundle」，安装时自动把
+#   下面这一层叠进 profile 的配置树；不需要用户手改 cordis.yml。
+#
+# 【改这里要注意】
+#   - id / name 两行不要写行尾注释：商城预检（check-plugin-submission.mjs）
+#     按行抓值并要求其后直接换行，行尾注释会让它抓不到，整份提交被判
+#     SUBMISSION_ENTRY_MISSING。
+#   - name 必须与 package.json 的 name 逐字一致（@tuweizhi/dsh-session-delete），
+#     它既是 Host 半侧的模块名，也是浏览器半侧 /plugins/<name>/client.js 的 id。
+#   - id 保持不带作用域的裸名（与同作者的 dsh-pet / dsh-translator 一致），
+#     这样替换安装时对齐的是同一行，配置树里不会多出重复挂载。
+#
+# ============================================================================
+
+- insert:
+    - id: dsh-session-delete
+      name: '@tuweizhi/dsh-session-delete'

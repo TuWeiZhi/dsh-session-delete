@@ -1,0 +1,158 @@
+# 手动触发的发版流水线。
+#
+# 发布凭证走 npm Trusted Publishing (OIDC)：GitHub Actions 用 `id-token: write` 换一次性凭证，
+# 仓库里不需要、也不应该放 NPM_TOKEN。前置条件（必须先在 npm 侧配好，否则这里会 401）：
+#   https://www.npmjs.com/package/@tuweizhi/dsh-session-delete/settings → Trusted Publisher → GitHub Actions
+#     Organization or user : TuWeiZhi
+#     Repository           : dsh-session-delete
+#     Workflow filename    : publish.yml
+#     Allowed actions      : 勾上 "Allow npm publish"（不勾就只能 npm stage publish，直接发布会失败）
+# 用 OIDC 发布时 npm 会自动附加 provenance 证明（不要写 --provenance=false）。
+#
+# 日常 CI（push/PR）在 ci.yml，跑的是同一个 `npm run check`；这里的门禁是「发版前再确认一次」。
+name: Publish to npm
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: '本次发版原因（可留空；非空时会写在 Release 说明最前面）'
+        required: false
+        default: ''
+      dry_run:
+        description: '只演练：跑全部检查并生成 Release 说明，但**不发布、不建 Release**'
+        type: boolean
+        default: false
+
+# 防止连点两次并行发布（排队而不是互相踩）
+concurrency:
+  group: publish-npm
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # 创建 tag / GitHub Release
+  id-token: write   # npm Trusted Publishing (OIDC) 换取临时凭证
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      # 安全闸：手动触发时 GitHub 允许选分支 —— 从非 main 发版会把「那个分支的版本」发出去，这里硬失败。
+      - name: Guard (must run on main)
+        run: |
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "::error::发布只允许在 main 上触发（当前 ${GITHUB_REF}）。请在 Run workflow 里把 Use workflow from 选成 main。"
+            exit 1
+          fi
+          echo "ref = ${GITHUB_REF}（OK）"
+
+      # fetch-depth: 0 拉全量历史与 tag，changelog 需要 diff 上一个版本 tag
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          registry-url: 'https://registry.npmjs.org'
+
+      # 必须：npm >= 11.5.1 才支持 Trusted Publishing (OIDC) 自动交换；npm 10.x 会直接 ENEEDAUTH
+      - name: Upgrade npm for OIDC support
+        run: npm install -g npm@latest
+
+      # 清理 .npmrc 里可能残留的 _authToken，让 npm 走 OIDC 而不是拿一个空 token 去撞 401
+      - name: Clean .npmrc for OIDC
+        run: |
+          if [ -n "$NPM_CONFIG_USERCONFIG" ] && [ -f "$NPM_CONFIG_USERCONFIG" ]; then
+            echo "Stripping _authToken from .npmrc for OIDC..."
+            sed -i '/_authToken/d' "$NPM_CONFIG_USERCONFIG"
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      # 发版门禁：清单/补丁/图标/locale 自检 + 宿主模拟回归用例
+      - name: Gate (manifest self-check + host-simulation tests)
+        run: npm run check
+
+      # 当前版本是否已发布过（避免重复触发同一版本时发布失败炸掉 workflow）
+      - name: Check if version already published
+        id: check
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' "https://registry.npmjs.org/@tuweizhi%2fdsh-session-delete/${VERSION}")
+          echo "### @tuweizhi/dsh-session-delete v${VERSION}" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$CODE" = "200" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "版本 ${VERSION} 已存在于 npm，跳过发布" | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "版本 ${VERSION} 未发布，开始发布" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # prepublishOnly 会自动再跑一次 verify + tests；没有构建步骤，lib/ 就是源码
+      - name: Publish to npm
+        if: steps.check.outputs.exists == 'false' && github.event.inputs.dry_run != 'true'
+        run: npm publish --access public --registry https://registry.npmjs.org
+
+      # 生成 changelog：上个 v* tag 之后合入 main 的 PR（标题 + 编号），无 tag 则取全部
+      - name: Build release changelog
+        id: changelog
+        if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
+          if [ -n "$PREV_TAG" ]; then
+            SINCE=$(git log -1 --format=%ct "$PREV_TAG")
+            echo "changelog 范围：${PREV_TAG} 之后"
+          else
+            SINCE="0"
+            echo "仓库没有 tag，changelog 回退为全部已合并 PR"
+          fi
+          gh pr list --state merged --base main --limit 500 --json number,title,mergedAt \
+            | jq -r --argjson since "${SINCE:-0}" \
+              '[ .[] | select($since == 0 or (.mergedAt | fromdateiso8601) > $since) ]
+               | sort_by(.number)
+               | .[] | "- \(.title) (#\(.number))"' > pr_lines.md
+          if [ ! -s pr_lines.md ]; then
+            echo "- 本次发布无关联的合并 PR" > pr_lines.md
+          fi
+          {
+            if [ -n "${{ github.event.inputs.reason }}" ]; then
+              echo "${{ github.event.inputs.reason }}"
+              echo
+            fi
+            echo "## What's Changed"
+            echo
+            cat pr_lines.md
+            echo
+            if [ -n "$PREV_TAG" ]; then
+              echo "**Full Changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${PREV_TAG}...v${VERSION}"
+            fi
+          } > release_notes.md
+          cat release_notes.md
+
+      # 创建 GitHub Release 与 v<version> tag；幂等：release 已存在则跳过
+      - name: Create GitHub Release
+        if: steps.check.outputs.exists == 'false' && github.event.inputs.dry_run != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if gh release view "v${VERSION}" >/dev/null 2>&1; then
+            echo "Release v${VERSION} 已存在，跳过创建"
+            exit 0
+          fi
+          gh release create "v${VERSION}" \
+            --target "${{ github.sha }}" \
+            --title "v${VERSION}" \
+            --notes-file release_notes.md
+
+      - name: Dry-run summary
+        if: github.event.inputs.dry_run == 'true'
+        run: |
+          echo "### 演练结束（未发布、未建 Release）" >> "$GITHUB_STEP_SUMMARY"
+          echo "上面 'Build release changelog' 那一步打印的就是本次会写入 Release 的说明。" >> "$GITHUB_STEP_SUMMARY"

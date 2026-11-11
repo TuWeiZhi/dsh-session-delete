@@ -1,0 +1,22 @@
+# Everything this repository can verify without a DSH instance.
+#
+# `npm run check` is the whole gate: the manifest/bundle/icon/locale self-check plus the
+# host-simulation tests in `tests/`. There is no build step and no dependency, so nothing
+# here can drift from the published tarball.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - run: npm run check

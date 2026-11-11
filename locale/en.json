@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Session delete",
+    "description": "Delete a session for real, including the one currently open: its directory moves to sessions-trash, the row disappears right away and the main view falls back to the empty state, without reloading the page."
+  }
+}

@@ -1,0 +1,19 @@
+# dependencies
+node_modules/
+
+# a project-level .npmrc can carry an _authToken — never stage it
+.npmrc
+
+# npm's cache when it is redirected into the repo
+.npm-cache/
+
+# local scratch: packed tarballs, throwaway DSH_HOME profiles
+*.tgz
+.e2e-home/
+
+# editors / OS
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/

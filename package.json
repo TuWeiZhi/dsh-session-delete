@@ -1,0 +1,72 @@
+{
+  "name": "@tuweizhi/dsh-session-delete",
+  "version": "0.1.0",
+  "description": "Actually delete a DeepSeek Harness session — including the one that is currently open. The session directory is moved into sessions-trash (restorable by hand), the row disappears without reloading the page, and the main view falls back to the empty state. 真正删除 DSH 会话，包括正在使用的那个：目录移入 sessions-trash、列表即时摘行、当前视图退回空状态，全程不整页刷新。",
+  "icon": "icon.svg",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "locale/*.json",
+    "cordis.patch.yml",
+    "icon.svg",
+    "README.md",
+    "README.zh.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "check": "node scripts/verify.mjs && node --test \"tests/*.test.mjs\"",
+    "test": "node --test \"tests/*.test.mjs\"",
+    "prepublishOnly": "node scripts/verify.mjs && node --test \"tests/*.test.mjs\""
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "deepseek-harness-plugin",
+    "cordis",
+    "plugin",
+    "session",
+    "session-management",
+    "delete",
+    "cleanup",
+    "会话删除"
+  ],
+  "license": "MIT",
+  "author": "TuWeiZhi",
+  "homepage": "https://github.com/TuWeiZhi/dsh-session-delete#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TuWeiZhi/dsh-session-delete.git"
+  },
+  "bugs": {
+    "url": "https://github.com/TuWeiZhi/dsh-session-delete/issues"
+  },
+  "engines": {
+    "node": ">=22.19.0",
+    "dsh": ">=0.2.1-alpha.1"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dsh": {
+    "manifestVersion": 1,
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-connection"
+      ]
+    }
+  }
+}
